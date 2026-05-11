@@ -1,28 +1,4 @@
 
-De Metal
-LIDERES EN HIERRO FORJADO
-
-
-Base de datos conectada
-Bienvenido
-Ingresa tus credenciales para continuar
-Usuario
-Contrasena
-👁
-Ingresar al sistema
-Accesos rapidos:
-JM
-Jose Maria
-Administrador
-YA
-Yamara
-Administrador
-DM
-De Metal Admin
-Supervisor
-DD
-De Metal Disenios
-Produccion
 import { useState, useEffect, useRef } from "react";
 
 const SUPA_URL = "https://bhirrdalujsevlwxoiji.supabase.co";
@@ -76,7 +52,6 @@ const MAT_CATS = ["Tubos", "Platinas", "Laminas", "Pintura", "Accesorios", "Torn
 const PRIORIDADES = ["Urgente", "Alta", "Media", "Baja"];
 const ESTADOS = ["Cotizacion", "Diseno", "En produccion", "Instalacion", "Entregado", "Atrasado"];
 
-// Moneda global del sistema
 var MONEDA = { simbolo: "L", nombre: "Lempiras" };
 
 function formatMonto(valor) {
