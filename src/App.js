@@ -1,4 +1,28 @@
 
+De Metal
+LIDERES EN HIERRO FORJADO
+
+
+Base de datos conectada
+Bienvenido
+Ingresa tus credenciales para continuar
+Usuario
+Contrasena
+👁
+Ingresar al sistema
+Accesos rapidos:
+JM
+Jose Maria
+Administrador
+YA
+Yamara
+Administrador
+DM
+De Metal Admin
+Supervisor
+DD
+De Metal Disenios
+Produccion
 import { useState, useEffect, useRef } from "react";
 
 const SUPA_URL = "https://bhirrdalujsevlwxoiji.supabase.co";
@@ -51,6 +75,13 @@ const FLOW_LABELS = {
 const MAT_CATS = ["Tubos", "Platinas", "Laminas", "Pintura", "Accesorios", "Tornilleria", "Herramientas", "Vidrio", "Madera", "Otro"];
 const PRIORIDADES = ["Urgente", "Alta", "Media", "Baja"];
 const ESTADOS = ["Cotizacion", "Diseno", "En produccion", "Instalacion", "Entregado", "Atrasado"];
+
+// Moneda global del sistema
+var MONEDA = { simbolo: "L", nombre: "Lempiras" };
+
+function formatMonto(valor) {
+  return MONEDA.simbolo + " " + (+valor || 0).toLocaleString();
+}
 
 const USERS = [
   { id: "U01", name: "Jose Maria", role: "Administrador", avatar: "JM", color: "#8b5cf6", user: "josemaria", pass: "planta2024" },
@@ -1409,6 +1440,10 @@ export default function App() {
           <div style={{ display: "flex", gap: 7, alignItems: "center" }}>
             <div style={{ width: 7, height: 7, borderRadius: 4, background: isOnline ? C.green : C.red }} />
             <span style={{ fontSize: 11, color: C.muted }}>{isOnline ? "Conectado" : "Sin conexion"}</span>
+          </div>
+          <div style={{ display: "flex", border: "1px solid " + C.border, borderRadius: 8, overflow: "hidden" }}>
+            <button onClick={function() { MONEDA.simbolo = "L"; MONEDA.nombre = "Lempiras"; window.dispatchEvent(new Event("moneda")); }} style={{ padding: "4px 10px", border: "none", background: MONEDA.simbolo === "L" ? C.accent + "15" : "#fff", color: MONEDA.simbolo === "L" ? C.accent : C.muted, cursor: "pointer", fontSize: 11, fontWeight: MONEDA.simbolo === "L" ? 700 : 400 }}>L</button>
+            <button onClick={function() { MONEDA.simbolo = "$"; MONEDA.nombre = "Dolares"; window.dispatchEvent(new Event("moneda")); }} style={{ padding: "4px 10px", border: "none", background: MONEDA.simbolo === "$" ? C.accent + "15" : "#fff", color: MONEDA.simbolo === "$" ? C.accent : C.muted, cursor: "pointer", fontSize: 11, fontWeight: MONEDA.simbolo === "$" ? 700 : 400 }}>$</button>
           </div>
           <Badge label={currentUser.role} bg={rp.bg} text={rp.color} border={rp.border} />
         </div>
