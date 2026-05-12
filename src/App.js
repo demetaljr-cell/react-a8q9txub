@@ -372,6 +372,331 @@ function QuickUpdate({ project, currentUser, onClose, onSaved }) {
   );
 }
 
+// ─── QUOTES ──────────────────────────────────────────────────────────────────
+function QuotesModule({ currentUser, onConvert }) {
+  var [quotes, setQuotes] = useState([]);
+  var [loading, setLoading] = useState(true);
+  var [modal, setModal] = useState(null);
+  var [delConfirm, setDelConfirm] = useState(null);
+  var [preview, setPreview] = useState(null);
+  var rp = PERMS[currentUser.role] || PERMS["Instalacion"];
+
+  var emptyForm = {
+    client: "", phone: "", email: "", type: "", location: "",
+    validity: 30, notes: "", status: "Borrador",
+    items: [{ desc: "", qty: 1, unit: "ml", price: 0 }]
+  };
+  var [form, setForm] = useState(emptyForm);
+
+  var load = async function() {
+    setLoading(true);
+    try { var q = await db.get("quotes", "select=*"); setQuotes(q || []); } catch(e) { setQuotes([]); }
+    setLoading(false);
+  };
+  useEffect(function() { load(); }, []);
+
+  var calcTotal = function(items) {
+    return (items || []).reduce(function(a, i) { return a + ((+i.qty || 0) * (+i.price || 0)); }, 0);
+  };
+
+  var openCreate = function() { setForm(emptyForm); setModal({ mode: "create" }); };
+  var openEdit = function(q, e) {
+    if (e) e.stopPropagation();
+    var items = [];
+    try { items = typeof q.items === "string" ? JSON.parse(q.items) : (q.items || []); } catch(err) { items = []; }
+    setForm({
+      client: q.client || "", phone: q.phone || "", email: q.email || "",
+      type: q.type || "", location: q.location || "", validity: q.validity || 30,
+      notes: q.notes || "", status: q.status || "Borrador", items: items
+    });
+    setModal({ mode: "edit", id: q.id });
+  };
+
+  var save = async function() {
+    if (!form.client || !form.type) { alert("Cliente y tipo de trabajo son obligatorios"); return; }
+    var total = calcTotal(form.items);
+    var data = {
+      client: form.client, phone: form.phone, email: form.email,
+      type: form.type, location: form.location, validity: +form.validity,
+      notes: form.notes, status: form.status,
+      total: total, items: JSON.stringify(form.items),
+      date: new Date().toISOString().slice(0, 10)
+    };
+    try {
+      if (modal.mode === "create") {
+        await db.insert("quotes", data);
+      } else {
+        await db.update("quotes", "id=eq." + modal.id, Object.assign({}, data, { updated_at: new Date().toISOString() }));
+      }
+      setModal(null); load();
+    } catch(e) { alert("Error: " + e.message); }
+  };
+
+  var del = async function() {
+    try { await db.remove("quotes", "id=eq." + delConfirm.id); setDelConfirm(null); load(); } catch(e) { alert("Error: " + e.message); }
+  };
+
+  var changeStatus = async function(q, newStatus) {
+    try { await db.update("quotes", "id=eq." + q.id, { status: newStatus, updated_at: new Date().toISOString() }); load(); } catch(e) { alert("Error: " + e.message); }
+  };
+
+  var convertToProject = async function(q) {
+    if (!window.confirm("Convertir esta cotizacion en proyecto activo?")) return;
+    try {
+      await db.insert("projects", {
+        client: q.client, type: q.type, area: q.location || "",
+        budget: q.total || 0, status: "Cotizacion", phase: "Diseno",
+        priority: "Media", progress: 0, alert: false,
+        responsible: "", delivery: "", notes: "Creado desde cotizacion"
+      });
+      await db.update("quotes", "id=eq." + q.id, { status: "Aprobada", updated_at: new Date().toISOString() });
+      load();
+      alert("Proyecto creado correctamente.");
+    } catch(e) { alert("Error: " + e.message); }
+  };
+
+  var addItem = function() {
+    setForm(function(f) { return Object.assign({}, f, { items: f.items.concat([{ desc: "", qty: 1, unit: "ml", price: 0 }]) }); });
+  };
+
+  var removeItem = function(idx) {
+    setForm(function(f) { return Object.assign({}, f, { items: f.items.filter(function(_, i) { return i !== idx; }) }); });
+  };
+
+  var setItem = function(idx, key, val) {
+    setForm(function(f) {
+      var items = f.items.map(function(it, i) {
+        if (i !== idx) return it;
+        var updated = Object.assign({}, it);
+        updated[key] = val;
+        return updated;
+      });
+      return Object.assign({}, f, { items: items });
+    });
+  };
+
+  var statusStyle2 = function(s) {
+    return {
+      Borrador: { bg: C.bg2, text: C.muted, border: C.border },
+      Enviada: { bg: C.blueBg, text: C.blueText, border: C.blueBorder },
+      Aprobada: { bg: C.greenBg, text: C.greenText, border: C.greenBorder },
+      Rechazada: { bg: C.redBg, text: C.redText, border: C.redBorder }
+    }[s] || { bg: C.bg2, text: C.muted, border: C.border };
+  };
+
+  var UNITS = ["ml", "m2", "kg", "lt", "pz", "hr", "global"];
+
+  // Vista previa PDF
+  if (preview) {
+    var pvItems = [];
+    try { pvItems = typeof preview.items === "string" ? JSON.parse(preview.items) : (preview.items || []); } catch(e) { pvItems = []; }
+    var pvTotal = calcTotal(pvItems);
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <Btn onClick={function() { setPreview(null); }}>Volver</Btn>
+          <div style={{ flex: 1 }}><div style={{ fontSize: 16, fontWeight: 700 }}>Vista previa de cotizacion</div></div>
+          <Btn onClick={function() { window.print(); }}>Imprimir / Guardar PDF</Btn>
+        </div>
+        <div style={{ background: "#fff", border: "1px solid " + C.border, borderRadius: 14, overflow: "hidden", boxShadow: "0 4px 20px rgba(0,0,0,0.08)" }}>
+          <div style={{ background: "#111", padding: "28px 36px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <div style={{ fontFamily: "Georgia,serif", fontSize: 28, fontWeight: 700, color: "#fff" }}>De Metal</div>
+              <div style={{ fontSize: 10, color: "#888", letterSpacing: "0.16em", textTransform: "uppercase", marginTop: 4 }}>Lideres en hierro forjado</div>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontSize: 11, color: "#888", textTransform: "uppercase", letterSpacing: "0.1em" }}>Cotizacion</div>
+              <div style={{ fontSize: 13, color: "#ccc", marginTop: 3 }}>{preview.date || new Date().toLocaleDateString("es-MX")}</div>
+              <div style={{ fontSize: 11, color: "#666", marginTop: 2 }}>Valida por {preview.validity || 30} dias</div>
+            </div>
+          </div>
+          <div style={{ padding: "28px 36px", display: "flex", flexDirection: "column", gap: 22 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+              <div>
+                <div style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>Cliente</div>
+                <div style={{ fontSize: 20, fontWeight: 700, color: C.text }}>{preview.client}</div>
+                {preview.phone && <div style={{ fontSize: 13, color: C.muted, marginTop: 4 }}>Tel: {preview.phone}</div>}
+                {preview.email && <div style={{ fontSize: 13, color: C.muted }}>Email: {preview.email}</div>}
+                {preview.location && <div style={{ fontSize: 13, color: C.muted }}>Lugar: {preview.location}</div>}
+              </div>
+              <div>
+                <div style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>Trabajo a realizar</div>
+                <div style={{ fontSize: 16, fontWeight: 600, color: C.text }}>{preview.type}</div>
+              </div>
+            </div>
+            <div style={{ height: 1, background: C.border }} />
+            <div>
+              <div style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 12 }}>Detalle de partidas</div>
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr style={{ background: C.bg2 }}>
+                    {["Descripcion", "Cantidad", "Unidad", "Precio unitario", "Total"].map(function(h) {
+                      return <th key={h} style={{ padding: "10px 12px", fontSize: 11, color: C.muted, textAlign: h === "Descripcion" ? "left" : "right", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>{h}</th>;
+                    })}
+                  </tr>
+                </thead>
+                <tbody>
+                  {pvItems.map(function(it, i) {
+                    return (
+                      <tr key={i} style={{ borderBottom: "1px solid " + C.border }}>
+                        <td style={{ padding: "10px 12px", fontSize: 13, color: C.text }}>{it.desc}</td>
+                        <td style={{ padding: "10px 12px", fontSize: 13, color: C.text, textAlign: "right" }}>{it.qty}</td>
+                        <td style={{ padding: "10px 12px", fontSize: 13, color: C.text, textAlign: "right" }}>{it.unit}</td>
+                        <td style={{ padding: "10px 12px", fontSize: 13, color: C.text, textAlign: "right" }}>{MONEDA.simbolo} {(+it.price || 0).toLocaleString()}</td>
+                        <td style={{ padding: "10px 12px", fontSize: 13, fontWeight: 600, color: C.text, textAlign: "right" }}>{MONEDA.simbolo} {((+it.qty || 0) * (+it.price || 0)).toLocaleString()}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
+                <div style={{ background: C.bg2, border: "1px solid " + C.border, borderRadius: 10, padding: "14px 22px", textAlign: "right" }}>
+                  <div style={{ fontSize: 12, color: C.muted }}>Total de la cotizacion</div>
+                  <div style={{ fontSize: 26, fontWeight: 700, color: C.accent, marginTop: 4 }}>{MONEDA.simbolo} {pvTotal.toLocaleString()}</div>
+                  <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>{MONEDA.nombre}</div>
+                </div>
+              </div>
+            </div>
+            {preview.notes && (
+              <div>
+                <div style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>Notas y condiciones</div>
+                <div style={{ fontSize: 13, color: C.muted, lineHeight: 1.7 }}>{preview.notes}</div>
+              </div>
+            )}
+            <div style={{ height: 1, background: C.border }} />
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted }}>
+              <span>De Metal - Lideres en hierro forjado - San Pedro Sula, Honduras</span>
+              <span>Cotizacion valida por {preview.validity || 30} dias a partir del {preview.date || new Date().toLocaleDateString("es-MX")}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+        <div>
+          <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: C.text }}>Cotizaciones</h2>
+          <div style={{ fontSize: 12, color: C.muted }}>{quotes.length} registros - Ciclo completo: Borrador a Proyecto</div>
+        </div>
+        {rp.editar && <Btn variant="primary" onClick={openCreate}>+ Nueva cotizacion</Btn>}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(110px,1fr))", gap: 10 }}>
+        <Metric label="Total" value={quotes.length} icon="📋" />
+        <Metric label="Borradores" value={quotes.filter(function(q) { return q.status === "Borrador"; }).length} color={C.muted} icon="✏️" />
+        <Metric label="Enviadas" value={quotes.filter(function(q) { return q.status === "Enviada"; }).length} color={C.blueText} icon="📤" />
+        <Metric label="Aprobadas" value={quotes.filter(function(q) { return q.status === "Aprobada"; }).length} color={C.greenText} icon="✅" />
+        <Metric label="Valor total" value={MONEDA.simbolo + " " + quotes.filter(function(q) { return q.status === "Aprobada"; }).reduce(function(a, q) { return a + (+q.total || 0); }, 0).toLocaleString()} color={C.accent} icon="💰" />
+      </div>
+
+      {loading
+        ? <div style={{ padding: 40, textAlign: "center", color: C.muted }}>Cargando...</div>
+        : quotes.length === 0
+          ? <div style={{ padding: 40, textAlign: "center", color: C.muted, border: "2px dashed " + C.border, borderRadius: 12 }}>
+              <div style={{ fontSize: 32, marginBottom: 10 }}>📋</div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: C.text }}>Sin cotizaciones</div>
+              <div style={{ fontSize: 13, color: C.muted, marginTop: 4, marginBottom: 16 }}>Crea la primera cotizacion para un cliente</div>
+              {rp.editar && <Btn variant="primary" onClick={openCreate}>+ Crear primera cotizacion</Btn>}
+            </div>
+          : quotes.map(function(q) {
+              var ss = statusStyle2(q.status);
+              return (
+                <div key={q.id} style={{ background: C.bg, border: "1px solid " + C.border, borderRadius: 12, padding: "16px 20px" }}>
+                  <div style={{ display: "flex", gap: 14, alignItems: "flex-start", flexWrap: "wrap" }}>
+                    <div style={{ flex: 1, minWidth: 200 }}>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 5, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 15, fontWeight: 700, color: C.text }}>{q.client}</span>
+                        <Badge label={q.status} bg={ss.bg} text={ss.text} border={ss.border} />
+                      </div>
+                      <div style={{ fontSize: 13, color: C.muted, marginBottom: 4 }}>{q.type}</div>
+                      <div style={{ fontSize: 12, color: C.muted }}>
+                        {q.location && "📍 " + q.location + "  "}
+                        {q.phone && "📞 " + q.phone + "  "}
+                        {q.date && "📅 " + q.date}
+                      </div>
+                    </div>
+                    <div style={{ textAlign: "right", flexShrink: 0 }}>
+                      <div style={{ fontSize: 22, fontWeight: 700, color: C.accent }}>{MONEDA.simbolo} {(+q.total || 0).toLocaleString()}</div>
+                      <div style={{ fontSize: 11, color: C.muted }}>{MONEDA.nombre} - Valida {q.validity || 30} dias</div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap", borderTop: "1px solid " + C.border, paddingTop: 12 }}>
+                    <Btn size="sm" onClick={function() { setPreview(q); }}>👁 Ver PDF</Btn>
+                    {rp.editar && <Btn size="sm" onClick={function(e) { openEdit(q, e); }}>✏ Editar</Btn>}
+                    {q.status === "Borrador" && rp.editar && (
+                      <Btn size="sm" onClick={function() { changeStatus(q, "Enviada"); }} style={{ background: C.blueBg, color: C.blueText, border: "1px solid " + C.blueBorder }}>📤 Marcar enviada</Btn>
+                    )}
+                    {q.status === "Enviada" && rp.editar && (
+                      <>
+                        <Btn size="sm" onClick={function() { changeStatus(q, "Aprobada"); }} style={{ background: C.greenBg, color: C.greenText, border: "1px solid " + C.greenBorder }}>✅ Aprobar</Btn>
+                        <Btn size="sm" onClick={function() { changeStatus(q, "Rechazada"); }} style={{ background: C.redBg, color: C.redText, border: "1px solid " + C.redBorder }}>❌ Rechazar</Btn>
+                      </>
+                    )}
+                    {q.status === "Aprobada" && rp.editar && (
+                      <Btn size="sm" variant="primary" onClick={function() { convertToProject(q); }}>🚀 Convertir a proyecto</Btn>
+                    )}
+                    {rp.eliminar && <Btn size="sm" variant="danger" onClick={function(e) { e.stopPropagation(); setDelConfirm(q); }}>🗑</Btn>}
+                  </div>
+                </div>
+              );
+            })
+      }
+
+      {modal && (
+        <Modal title={modal.mode === "create" ? "Nueva cotizacion" : "Editar cotizacion"} onClose={function() { setModal(null); }} width={640}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <Inp label="Nombre del cliente" required value={form.client} onChange={function(e) { setForm(function(f) { return Object.assign({}, f, { client: e.target.value }); }); }} placeholder="Nombre completo" />
+              <Inp label="Tipo de trabajo" required value={form.type} onChange={function(e) { setForm(function(f) { return Object.assign({}, f, { type: e.target.value }); }); }} placeholder="Ej: Barandal residencial 2 plantas" />
+              <Inp label="Telefono" value={form.phone} onChange={function(e) { setForm(function(f) { return Object.assign({}, f, { phone: e.target.value }); }); }} placeholder="9999-0000" />
+              <Inp label="Correo electronico" value={form.email} onChange={function(e) { setForm(function(f) { return Object.assign({}, f, { email: e.target.value }); }); }} type="email" placeholder="correo@ejemplo.com" />
+              <Inp label="Ubicacion / Lugar del trabajo" value={form.location} onChange={function(e) { setForm(function(f) { return Object.assign({}, f, { location: e.target.value }); }); }} placeholder="Col. Las Palmas, SPS" />
+              <Inp label="Validez (dias)" value={form.validity} onChange={function(e) { setForm(function(f) { return Object.assign({}, f, { validity: e.target.value }); }); }} type="number" placeholder="30" />
+              <Inp label="Estado" value={form.status} onChange={function(e) { setForm(function(f) { return Object.assign({}, f, { status: e.target.value }); }); }} opts={["Borrador", "Enviada", "Aprobada", "Rechazada"]} />
+            </div>
+
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>Partidas del trabajo</div>
+                <Btn size="sm" onClick={addItem}>+ Agregar linea</Btn>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {form.items.map(function(it, i) {
+                  return (
+                    <div key={i} style={{ display: "grid", gridTemplateColumns: "3fr 1fr 1fr 1fr auto", gap: 8, alignItems: "end" }}>
+                      <Inp label={i === 0 ? "Descripcion" : ""} value={it.desc} onChange={function(e) { setItem(i, "desc", e.target.value); }} placeholder="Ej: Tubo cuadrado 1 1/2 pulgada" />
+                      <Inp label={i === 0 ? "Cantidad" : ""} value={it.qty} onChange={function(e) { setItem(i, "qty", e.target.value); }} type="number" placeholder="1" />
+                      <Inp label={i === 0 ? "Unidad" : ""} value={it.unit} onChange={function(e) { setItem(i, "unit", e.target.value); }} opts={UNITS} />
+                      <Inp label={i === 0 ? "Precio unit." : ""} value={it.price} onChange={function(e) { setItem(i, "price", e.target.value); }} type="number" placeholder="0" />
+                      <button onClick={function() { removeItem(i); }} style={{ background: C.redBg, border: "1px solid " + C.redBorder, borderRadius: 7, padding: "9px 10px", cursor: "pointer", color: C.redText, fontSize: 14, marginTop: i === 0 ? 20 : 0 }}>x</button>
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{ textAlign: "right", marginTop: 12, padding: "12px 16px", background: C.bg2, borderRadius: 10 }}>
+                <span style={{ fontSize: 13, color: C.muted }}>Total: </span>
+                <span style={{ fontSize: 20, fontWeight: 700, color: C.accent }}>{MONEDA.simbolo} {calcTotal(form.items).toLocaleString()}</span>
+              </div>
+            </div>
+
+            <Inp label="Notas y condiciones" value={form.notes} onChange={function(e) { setForm(function(f) { return Object.assign({}, f, { notes: e.target.value }); }); }} rows={3} placeholder="Ej: Incluye mano de obra e instalacion. Tiempo estimado: 3 semanas. 50% de anticipo." />
+
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+              <Btn onClick={function() { setModal(null); }}>Cancelar</Btn>
+              <Btn variant="primary" onClick={save}>{modal.mode === "create" ? "Crear cotizacion" : "Guardar cambios"}</Btn>
+            </div>
+          </div>
+        </Modal>
+      )}
+      {delConfirm && <ConfirmDel name={delConfirm.client} onConfirm={del} onCancel={function() { setDelConfirm(null); }} />}
+    </div>
+  );
+}
+
 // ─── PROJECTS ─────────────────────────────────────────────────────────────────
 function ProjectsModule({ currentUser }) {
   var [projects, setProjects] = useState([]);
@@ -1346,6 +1671,7 @@ export default function App() {
   var navItems = [
     { id: "dashboard", emoji: "▦", label: "Dashboard" },
     { id: "projects", emoji: "📁", label: "Proyectos" },
+    { id: "quotes", emoji: "📋", label: "Cotizaciones" },
     { id: "employees", emoji: "👷", label: "Empleados" },
     { id: "materials", emoji: "📦", label: "Materiales" },
     { id: "suppliers", emoji: "🏪", label: "Proveedores" },
@@ -1355,7 +1681,8 @@ export default function App() {
 
   var renderContent = function() {
     if (nav === "dashboard") return <Dashboard currentUser={currentUser} onNav={setNav} />;
-    if (nav === "projects") return <ProjectsModule currentUser={currentUser} />;
+    if (nav === "quotes") return <QuotesModule currentUser={currentUser} onConvert={function(q) { setNav("projects"); }} />;
+    
     if (nav === "employees") return <EmployeesModule currentUser={currentUser} />;
     if (nav === "materials") return <MaterialsModule currentUser={currentUser} />;
     if (nav === "suppliers") return <SuppliersModule currentUser={currentUser} />;
